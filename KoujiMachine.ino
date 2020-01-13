@@ -1,7 +1,16 @@
 // freakduino chibi v1.1B is atm328p at 8MHz
-// fasttech nano-ish board is arduino:avr:pro:cpu=16MHzatmega328
-// $ cd arduino_sketchbook
+//   + arduino:avr:pro:cpu=8MHzatmega328
+
+// fasttech ships a small footprint arduino board:
+//   + arduino:avr:pro:cpu=8MHzatmega328
+//   * 3 USD, shipping included
+//   * https://www.fasttech.com/products/0/10013165/2215700-nano-3-0-atmel-atmega328p-mini-usb-board-for
+
+// I use a FR ELECTRONICS ZRA6010A at pin 13,
+// https://www.fasttech.com/products/0/10036087/7867702-mager-1-channel-3-32v-ssr-solid-state-relay-module probably works as well.
+
 // $ ls KoujiMachine/KoujiMachine.ino
+// ...
 // $ arduino-cli core search avr
 // $ arduino-cli core install arduino:avr
 // $ arduino-cli compile --fqbn arduino:avr:pro:cpu=8MHzatmega328 KoujiMachine.ino
@@ -10,8 +19,8 @@
 // $ sudo usermod -a -G uucp $USER
 // $ killall minicom
 // $ arduino-cli upload -p /dev/ttyUSB0 --fqbn arduino:avr:pro:cpu=8MHzatmega328 KoujiMachine
-// $ echo 1:0:80000cbd:0:3:1c:7f:15:4:5:1:0:11:13:1a:0:12:f:17:16:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0 | stty -F /dev/ttyUSB0
-// $ cat /dev/ttyUSB0
+// $ #echo 1:0:80000cbd:0:3:1c:7f:15:4:5:1:0:11:13:1a:0:12:f:17:16:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0 | stty -F /dev/ttyUSB0; cat /dev/ttyUSB0
+// $ minicom -D /dev/ttyUSB0 -b 9600
 
 #define KOUJI 0
 #define BRISKET 1
