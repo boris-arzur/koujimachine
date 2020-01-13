@@ -84,12 +84,13 @@ void loop() {
     update_cycle_start = now;
     last_temp = temp; 
 
-    Serial.print("tempA0:");
-    Serial.print(tempA0);
-    Serial.print("tempA1:");
-    Serial.print(tempA1);
-    Serial.print("temp:");
-    Serial.print(temp);
+#define SHOW(x) \
+    Serial.print(" " #x ":"); \
+    Serial.print(x); \
+
+    SHOW(tempA0)
+    SHOW(tempA1)
+    SHOW(temp)
 
     auto show = [](const char* r, float v, float p) {
       Serial.print(" ");
@@ -105,8 +106,7 @@ void loop() {
     show("I", integrale, KI * integrale); 
     show("D", ddelta, - KD * ddelta); 
 
-    Serial.print(" pid:");
-    Serial.println(pid);
+    SHOW(pid)
   }
  
   // FR ELECTRONICS ZRA6010A at pin 13,
