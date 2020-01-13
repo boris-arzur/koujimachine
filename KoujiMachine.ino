@@ -116,6 +116,9 @@ void loop() {
     show("D", ddelta, - KD * ddelta); 
 
     SHOW(pid)
+#undef SHOW
+    Serial.println();
+
   }
  
   // FR ELECTRONICS ZRA6010A at pin 13,
