@@ -6,7 +6,9 @@
 //   * 3 USD, shipping included
 //   * https://www.fasttech.com/products/0/10013165/2215700-nano-3-0-atmel-atmega328p-mini-usb-board-for
 
-// I use a FR ELECTRONICS ZRA6010A at pin 13,
+// I use a FR ELECTRONICS ZRA6010A at pin 13, driving:
+// - brisket : 40 W lamp in water, in a pan, well insulated (electric & thermal)
+// - kouji : 200 W hair drier inside cardboard box
 // https://www.fasttech.com/products/0/10036087/7867702-mager-1-channel-3-32v-ssr-solid-state-relay-module probably works as well.
 
 // $ ls KoujiMachine/KoujiMachine.ino
@@ -25,115 +27,97 @@
 #define KOUJI 0
 #define BRISKET 1
 
+#define TIMEBASE 1000.0 // millis() to s
+
 #if KOUJI
 #define CONSIGNE 37.0
 #define TOO_HIGH 40.0 /* strict no overshoot */
-#define TIMEBASE 1000.0
-#define UPDATE_PID (1.0 * TIMEBASE)
-#define PID_CYCLE (20.0 * TIMEBASE)
 #elif BRISKET
 #define CONSIGNE 68.0 // 57 is low 68 is high
 #define TOO_HIGH 70.0 /* strict no overshoot */
-#define TIMEBASE (60 * 1000.0)
-#define UPDATE_PID (1.0 * TIMEBASE)
-#define PID_CYCLE (0.1 * TIMEBASE)
 #endif
 
-#define SPEED 0.16
-#define KP (4 / (SPEED * PID_CYCLE))
-#define KI (0.1 * KP)
-#define KD (1000 * KP)
+#define UPDATE_PID (1.0 * TIMEBASE)
+/* offset the two cycles, we don't want to measure temperatures
+   at the low point of the actuation cycle, we want to sample
+   around in the cycle. */
+#define ACTUATE_PID (10.0 * UPDATE_PID + 2 * UPDATE_PID / 3)
+
+#define KI 0.001
 #define START 0.3
 
-float last_temp;
 float integrale;
-float pid;
-
 unsigned long update_cycle_start;
 unsigned long pid_cycle_start;
 
 void setup() {
-  // initialize serial communication at 9600 bits per second:
-  Serial.begin(9600); // 9600 8N1 in minicom...
+  Serial.begin(9600); // 9600 8N1
   Serial.println("online");
   analogReference(EXTERNAL); // we connect 3.3V on AREF
 
-  delay(100);
-
-  last_temp = readAnalogTM61(A0);
   integrale = START * 1 / KI;
-  pid = START;
   update_cycle_start = millis();
   pid_cycle_start = millis();
 }
 
-#define AREF_STEP_TO_BIASED_TEMP 3.3 / 1024 * 100.0
-#define TEMP_BIAS 0.6 * 100
-float readAnalogTM61(int pin) {
+static float readAnalogTM61(int pin) {
+  static const float aref_step_to_biased_temp = 3.3 / 1024 * 100.0;
+  static const float temp_bias = 0.6 * 100;
+
   const int read_ = analogRead(pin);
-  return AREF_STEP_TO_BIASED_TEMP * read_ - TEMP_BIAS;
+  return aref_step_to_biased_temp * read_ - temp_bias;
 }
 
 void loop() {
-  const unsigned long now = millis();
-  const float tempA0 = readAnalogTM61(A0);
-  const float tempA1 = readAnalogTM61(A1);
+  const auto now = millis();
+  const auto temp0 = readAnalogTM61(A0);
+  const auto temp1 = readAnalogTM61(A1);
+
+#define SHOW(x)               \
+    Serial.print(" " #x ":"); \
+    Serial.print(x);
 
   if (now - update_cycle_start > UPDATE_PID) {
-    const float temp = (tempA0 + tempA1) / 2;
-    const float delta = CONSIGNE - temp; 
-    const float ddelta = 1000.0 * (temp - last_temp) / (now - update_cycle_start);
+    const auto delta = CONSIGNE - temp0 + CONSIGNE - temp1;
 
-    integrale = integrale + (now - update_cycle_start) / 1000.0 * delta;
-    if (integrale < 0) integrale = 0;
-    if (integrale > 1.0 / KI) integrale = 1 / KI;
-
-    pid = KP * delta + KI * integrale - KD * ddelta;
+    integrale += (now - update_cycle_start) / TIMEBASE * delta;
+    if (integrale < 0.0) integrale = 0.0;
+    if (integrale > (1.0 / KI)) integrale = 1.0 / KI;
 
     update_cycle_start = now;
-    last_temp = temp; 
 
-#define SHOW(x) \
-    Serial.print(" " #x ":"); \
-    Serial.print(x); \
-
-    SHOW(tempA0)
-    SHOW(tempA1)
-    SHOW(temp)
-
-    auto show = [](const char* r, float v, float p) {
-      Serial.print(" ");
-      Serial.print(r);
-      Serial.print(":");
-      Serial.print(v);
-      Serial.print("[");
-      Serial.print(p);
-      Serial.print("]");
-    };
-
-    show("P", delta, KP * delta); 
-    show("I", integrale, KI * integrale); 
-    show("D", ddelta, - KD * ddelta); 
-
-    SHOW(pid)
-#undef SHOW
+    SHOW(temp0)
+    SHOW(temp1)
+    SHOW(delta)
+    SHOW(integrale)
     Serial.println();
 
+    // no more processing, try & decouple the pid update & actuation cycles.
+    delay(100);
+    return;
   }
- 
-  // FR ELECTRONICS ZRA6010A at pin 13,
-  // brisket : 40 W lamp in water, in a pan, well insulated (electric & thermal)
-  // kouji : 200 W hair drier insid cardboard box
-  if (now - pid_cycle_start > PID_CYCLE) {
-    digitalWrite(13, HIGH); // start cycle warming ON
-    pid_cycle_start = now;
-  } 
-  
-  if ((now - pid_cycle_start) > pid * PID_CYCLE ||
-      tempA1 > TOO_HIGH ||
-      tempA0 > TOO_HIGH) {
-    digitalWrite(13, LOW); // turn warming OFF
-  } 
+
+#define RESET_ACTUATION_CYCLE() pid_cycle_start = now;
+#define HEAT(x) digitalWrite(13, x);
+#define OFF LOW
+#define ON HIGH
+
+  const auto pid_time = ACTUATE_PID * KI * integrale;
+  const auto relative = now - pid_cycle_start;
+
+  if (relative > ACTUATE_PID) {
+    RESET_ACTUATION_CYCLE();
+  }
+
+  if (relative < pid_time) {
+    if (temp0 > TOO_HIGH || temp1 > TOO_HIGH) {
+      HEAT(OFF);
+    } else {
+      HEAT(ON);
+    }
+  } else {
+    HEAT(OFF);
+  }
 }
 
 /* how to plug things: text
