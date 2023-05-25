@@ -35,8 +35,15 @@ void set_faucet(int direction)
 //using seconds_t = int; // 21 B
 using seconds_t = unsigned long; // 25 B ok.
 
-2 * sizeof(int) + x = 21
-2 * sizeof(unsigned long) + x = 25
+//2 * sizeof(int) + x = 21
+//2 * sizeof(unsigned long) + x = 25
+// alignof?
+//template<int size_>
+//struct S { };
+//S<sizeof(int)>::wut;
+// -> sizeof(int) = 2
+//S<sizeof(unsigned long)>::wut;
+// -> sizeof(unsigned long) = 2
 
 unsigned long start_ = 0;
 int seconds_ = 0;
