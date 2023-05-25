@@ -5,49 +5,64 @@
 // $ killall minicom
 // $ arduino-cli upload -p /dev/ttyUSB0 --fqbn arduino:avr:pro:cpu=16MHzatmega328 KoujiMachine
 
+#include <inttypes.h>
+
 #define LED(x) digitalWrite(13, x);
+
 #define OPEN(x) digitalWrite(2, x)
-
 #define CLOSE(x) digitalWrite(3, x)
-#define DO_ACTUATE(open) \
-  if (open) { CLOSE(0); OPEN(1); } \
-  else { OPEN(0); CLOSE(1); }
 
+#define CLOSED 0
+#define OPENED 1
 
-#define CLOSED 1
-#define OPENED 0
-
-void set_faucet(int direction)
+void idle()
 {
-  DO_ACTUATE(direction)
-  delay(1000 /* ms */);
   OPEN(0);
   CLOSE(0);
 }
 
-#define UPDATE_LED 10000 /* ms */
-unsigned long start_ = 0;
-int led_ = 0;
+void set_faucet(int direction)
+{
+  if (direction == OPENED) { CLOSE(0); OPEN(1); }
+  else                     { OPEN(0); CLOSE(1); }
 
+  delay(2000 /* ms */);
+  idle();
+}
+
+#define UPDATE_LED 10000 /* ms */
+// 2
+//using seconds_t = int; // 21 B
+using seconds_t = unsigned long; // 25 B ok.
+
+2 * sizeof(int) + x = 21
+2 * sizeof(unsigned long) + x = 25
+
+unsigned long start_ = 0;
 int seconds_ = 0;
 int next_time_ = 0;
-int next_action_ = CLOSED;
+
+int led_ = 0;
+int next_action_ = OPENED;
 
 void setup()
 {
   set_faucet(CLOSED);
-  next_action_ = CLOSED;
-  next_time_ = 0;
+  next_action_ = OPENED;
+  next_time_ = 20 /* s */;
+  seconds_ = 0;
   start_ = millis();
 }
 
 void loop()
 {
   const auto now = millis();
-  if (now - start_ > UPDATE_LED) {
+  const auto delta = now - start_;
+
+  if (delta > UPDATE_LED) {
     LED(led_);
     led_ = !led_;
-    seconds_ += 10;
+    seconds_ += delta / 1000;
     start_ = now;
   }
 
@@ -56,11 +71,11 @@ void loop()
     if (next_action_ == CLOSED) {
       set_faucet(CLOSED);
       next_action_ = OPENED;
-      next_time_ = 7200; // in 2 hours
+      next_time_ = 3600 /* s */;
     } else {
       set_faucet(OPENED);
       next_action_ = CLOSED;
-      next_time_ = 60; // in 1 minute
+      next_time_ = 30 /* s */;
     }
   }
 
