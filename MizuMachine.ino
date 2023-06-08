@@ -22,6 +22,8 @@ DallasTemperature sensor(&oneWire);
 #define OPENED 1
 #define LOCKED 2
 
+#define TEST_MODE 0
+
 void idle()
 {
   OPEN(0);
@@ -33,12 +35,15 @@ void set_faucet(int direction)
   if (direction == OPENED) { CLOSE(0); OPEN(1); }
   else                     { OPEN(0); CLOSE(1); }
 
+#if TEST_MODE
   Serial.print((direction == OPENED)?"OPEN":"CLOSE");
   Serial.println();
+#endif
   delay(2000 /* ms */);
   idle();
 }
 
+#define ONE_LOOP 10001 /* ms */
 #define UPDATE_LED 10000 /* ms */
 using seconds_t = unsigned long;
 
@@ -53,14 +58,14 @@ void setup()
 {
   Serial.begin(9600); // 9600 8N1
   Serial.println("online");
-  delay(100);
 
-  // test routine
+#if TEST_MODE
   set_faucet(CLOSED);
   delay(1000);
   set_faucet(OPENED);
   delay(1000);
   set_faucet(CLOSED);
+#endif
 
   next_time_ = 0 /* s */;
   next_action_ = OPENED;
@@ -71,7 +76,8 @@ void setup()
 void loop()
 {
   static int need_flush = 0;
-  struct X { ~X() { if (need_flush) { Serial.println(); } } } __x; // scope clean
+  struct X { ~X() { if (need_flush) { Serial.println(); } } } __x;
+
   need_flush = 0;
 #define SHOW(x)               \
     need_flush = 1; \
@@ -81,8 +87,10 @@ void loop()
   sensor.requestTemperatures();
   const auto temp = sensor.getTempCByIndex(0);
 
-  // stop water when we dip below 22, restart when above 24.
-  const auto do_lock = (temp < 22.0) || ((next_action_ == LOCKED) && temp < 24.0);
+#define STOP 26.0
+#define RESTART 27.0
+  const auto do_lock = (temp < STOP)
+    || ((next_action_ == LOCKED) && temp < RESTART);
 
   SHOW(temp)
   SHOW(do_lock)
@@ -91,7 +99,7 @@ void loop()
     if (next_action_ != LOCKED) { /* we just locked */ set_faucet(CLOSED); }
     next_action_ = LOCKED;
     SHOW(next_action_)
-    delay(1000);
+    delay(ONE_LOOP);
     return;
   }
 
@@ -131,5 +139,5 @@ void loop()
     }
   }
 
-  delay(10001);
+  delay(ONE_LOOP);
 }
