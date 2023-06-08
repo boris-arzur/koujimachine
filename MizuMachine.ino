@@ -16,7 +16,7 @@ DallasTemperature sensor(&oneWire);
 #define ONE_LOOP 100 /* ms */
 
 using celcius_t = float;
-using seconds_t = double;
+using seconds_t = unsigned long;
 using milliseconds_t = unsigned long;
 
 void update_led(milliseconds_t led_speed) {
@@ -39,21 +39,55 @@ void update_seconds() {
 
   const auto now = millis();
   const auto delta = now - start;
-  const seconds_t elapsed = delta * 1.0e-3;
+  const seconds_t elapsed = delta / 1000;
+  const milliseconds_t left = delta - elapsed * 1000;
   seconds_ += elapsed;
-  start = now;
+  start = now - left;
 }
 
-void update_serial(celcius_t temperature, seconds_t back_to_open) {
-#define SHOW(x) Serial.print(" " #x ":"); Serial.print(x);
-    static seconds_t last = seconds_;
-    if (seconds_ - last > 30) {
-        SHOW(seconds_)
-        SHOW(temperature)
-        SHOW(back_to_open)
-        Serial.println();
-        last = seconds_;
-    }
+using state_t = int;
+#define Start 0
+#define Closed 1
+#define Opened 2
+#define Closing 3
+#define Opening 4
+#define Idling 5
+
+// TODO why can't use own type in proto? should be state_t
+void print_state(int state) {
+#define PRINT(x_)                                                              \
+  case x_:                                                                     \
+    Serial.print(#x_);                                                         \
+    break;
+  switch (state) {
+    PRINT(Start)
+    PRINT(Closed)
+    PRINT(Opened)
+    PRINT(Closing)
+    PRINT(Opening)
+    PRINT(Idling)
+  default:
+    Serial.print("INVALID");
+    break;
+  }
+}
+
+// TODO why can't use own type in proto? should be state_t
+void update_serial(celcius_t temperature, seconds_t back_to_open, int state) {
+#define SHOW(x)                                                                \
+  Serial.print(" " #x ":");                                                    \
+  Serial.print(x);
+  static seconds_t last = seconds_;
+  static int last_state = 0;
+  if (last_state != state || seconds_ - last > 10) {
+    print_state(state);
+    SHOW(seconds_)
+    SHOW(temperature)
+    SHOW(back_to_open)
+    Serial.println();
+    last = seconds_;
+    last_state = state;
+  }
 }
 
 celcius_t update_temp() {
@@ -62,35 +96,82 @@ celcius_t update_temp() {
 }
 
 seconds_t update_cycle(celcius_t temp) {
-    if (temp < 24) return 6 * 3600;
-    if (temp > 34) return 1800;
-    const auto x = (temp - 24.0) / (34.0 - 24.0);
-    return x * (1800 - 6 * 3600) + 6 * 3600;
+  struct point_t {
+    celcius_t temp;
+    double cycle;
+  };
+  struct system_t {
+    point_t low;
+    point_t high;
+  };
+
+  const auto update_system = [](const system_t &s, celcius_t temp) {
+    const auto &low = s.low;
+    const auto &high = s.high;
+    if (temp < low.temp) {
+      return low.cycle;
+    }
+    if (temp > high.temp) {
+      return high.cycle;
+    }
+    const auto x = (temp - low.temp) / (high.temp - low.temp);
+    return low.cycle + x * (high.cycle - low.cycle);
+  };
+
+  const double six = 6 * 3600;
+  const double half = 1800;
+  const system_t wide{{0.0, six}, {40.0, half}};
+  const system_t narrow{{24.0, six}, {31.0, half}};
+  return 0.5 * update_system(wide, temp) + 0.5 * update_system(narrow, temp);
 }
 
-void update_faucet(seconds_t back_to_open) {
-#define CLOSED 0
-#define OPENED 1
-  static int state = CLOSED;
+// TODO why can't use own type in proto? should be state_t
+int update_faucet(seconds_t back_to_open) {
+  static state_t state = Closed;
   static seconds_t back_to_idle = 0;
   static seconds_t back_to_close = 0;
 
 #define OPEN(x) digitalWrite(3, x)
 #define CLOSE(x) digitalWrite(2, x)
-  const auto idle = [&] { OPEN(0); CLOSE(0); back_to_idle = 0; };
-  const auto open = [&] { OPEN(1); state = OPENED; back_to_idle = 2; back_to_close = 30; };
-  const auto close = [&] { CLOSE(1); state = CLOSED; back_to_idle = 2; back_to_close = 0; };
+  const auto idle = [&] {
+    OPEN(0);
+    CLOSE(0);
+    back_to_idle = 0;
+    return Idling;
+  };
+  const auto open = [&] {
+    OPEN(1);
+    state = Opened;
+    back_to_idle = 2;
+    back_to_close = 30;
+    seconds_ = 0;
+    return Opening;
+  };
+  const auto close = [&] {
+    CLOSE(1);
+    state = Closed;
+    back_to_idle = 2;
+    back_to_close = 0;
+    return Closing;
+  };
 
-  if (back_to_idle > 0 && seconds_ >= back_to_idle) { idle(); return; }
-  if (back_to_close > 0 && seconds_ >= back_to_close) { close(); return; }
-  if (state == CLOSED && seconds_ >= back_to_open) { open(); return; }
+  if (back_to_idle > 0 && seconds_ >= back_to_idle) {
+    return idle();
+  }
+  if (back_to_close > 0 && seconds_ >= back_to_close) {
+    return close();
+  }
+  if (state == Closed && seconds_ >= back_to_open) {
+    return open();
+  }
+  return state;
 }
 
 void setup() {
   Serial.begin(9600); // 9600 8N1
   Serial.println("online");
 
-  update_faucet(0);
+  update_serial(0, 0, update_faucet(0));
 }
 
 void loop() {
@@ -98,8 +179,8 @@ void loop() {
   const auto faucet_time = update_cycle(temperature);
   update_led(faucet_time);
   update_seconds();
-  update_faucet(faucet_time);
-  update_serial(temperature, faucet_time);
+  const auto state = update_faucet(faucet_time);
+  update_serial(temperature, faucet_time, state);
 
   delay(ONE_LOOP);
 }
