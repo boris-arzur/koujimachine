@@ -1,143 +1,105 @@
 // $ arduino-cli core search avr
 // $ arduino-cli core install arduino:avr
-// $ arduino-cli compile --fqbn arduino:avr:pro:cpu=8MHzatmega328 KoujiMachine.ino
-// $ sudo usermod -a -G uucp $USER
-// $ killall minicom
-// $ arduino-cli upload -p /dev/ttyUSB0 --fqbn arduino:avr:pro:cpu=16MHzatmega328 KoujiMachine
+// $ arduino-cli compile --fqbn arduino:avr:pro:cpu=8MHzatmega328
+// KoujiMachine.ino $ sudo usermod -a -G uucp $USER $ killall minicom $
+// arduino-cli upload -p /dev/ttyUSB0 --fqbn arduino:avr:pro:cpu=16MHzatmega328
+// KoujiMachine
 
-#include <inttypes.h>
-#include <OneWire.h>
 #include <DallasTemperature.h>
+#include <OneWire.h>
+#include <inttypes.h>
 
 #define TEMPERATURE_PIN 4
 OneWire oneWire(TEMPERATURE_PIN);
 DallasTemperature sensor(&oneWire);
 
+#define ONE_LOOP 100 /* ms */
+
+using celcius_t = float;
+using seconds_t = double;
+using milliseconds_t = unsigned long;
+
+void update_led(milliseconds_t led_speed) {
 #define LED(x) digitalWrite(13, x);
+  static int led_on = 0;
+  static milliseconds_t start = millis();
+
+  const auto now = millis();
+  const auto delta = now - start;
+  if (delta > led_speed) {
+    LED(led_on);
+    led_on = !led_on;
+    start = now;
+  }
+}
+
+seconds_t seconds_ = 0;
+void update_seconds() {
+  static milliseconds_t start = millis();
+
+  const auto now = millis();
+  const auto delta = now - start;
+  const seconds_t elapsed = delta * 1.0e-3;
+  seconds_ += elapsed;
+  start = now;
+}
+
+void update_serial(celcius_t temperature, seconds_t back_to_open) {
+#define SHOW(x) Serial.print(" " #x ":"); Serial.print(x);
+    static seconds_t last = seconds_;
+    if (seconds_ - last > 30) {
+        SHOW(seconds_)
+        SHOW(temperature)
+        SHOW(back_to_open)
+        Serial.println();
+        last = seconds_;
+    }
+}
+
+celcius_t update_temp() {
+  sensor.requestTemperatures();
+  return sensor.getTempCByIndex(0);
+}
+
+seconds_t update_cycle(celcius_t temp) {
+    if (temp < 24) return 6 * 3600;
+    if (temp > 34) return 1800;
+    const auto x = (temp - 24.0) / (34.0 - 24.0);
+    return x * (1800 - 6 * 3600) + 6 * 3600;
+}
+
+void update_faucet(seconds_t back_to_open) {
+#define CLOSED 0
+#define OPENED 1
+  static int state = CLOSED;
+  static seconds_t back_to_idle = 0;
+  static seconds_t back_to_close = 0;
 
 #define OPEN(x) digitalWrite(3, x)
 #define CLOSE(x) digitalWrite(2, x)
+  const auto idle = [&] { OPEN(0); CLOSE(0); back_to_idle = 0; };
+  const auto open = [&] { OPEN(1); state = OPENED; back_to_idle = 2; back_to_close = 30; };
+  const auto close = [&] { CLOSE(1); state = CLOSED; back_to_idle = 2; back_to_close = 0; };
 
-#define CLOSED 0
-#define OPENED 1
-#define LOCKED 2
-
-#define TEST_MODE 0
-
-void idle()
-{
-  OPEN(0);
-  CLOSE(0);
+  if (back_to_idle > 0 && seconds_ >= back_to_idle) { idle(); return; }
+  if (back_to_close > 0 && seconds_ >= back_to_close) { close(); return; }
+  if (state == CLOSED && seconds_ >= back_to_open) { open(); return; }
 }
 
-void set_faucet(int direction)
-{
-  if (direction == OPENED) { CLOSE(0); OPEN(1); }
-  else                     { OPEN(0); CLOSE(1); }
-
-#if TEST_MODE
-  Serial.print((direction == OPENED)?"OPEN":"CLOSE");
-  Serial.println();
-#endif
-  delay(2000 /* ms */);
-  idle();
-}
-
-#define ONE_LOOP 10001 /* ms */
-#define UPDATE_LED 10000 /* ms */
-using seconds_t = unsigned long;
-
-unsigned long start_ = 0;
-int seconds_ = 0;
-int next_time_ = 0;
-
-int led_ = 0;
-int next_action_ = OPENED;
-
-void setup()
-{
+void setup() {
   Serial.begin(9600); // 9600 8N1
   Serial.println("online");
 
-#if TEST_MODE
-  set_faucet(CLOSED);
-  delay(1000);
-  set_faucet(OPENED);
-  delay(1000);
-  set_faucet(CLOSED);
-#endif
-
-  next_time_ = 0 /* s */;
-  next_action_ = OPENED;
-  seconds_ = 1;
-  start_ = millis();
+  update_faucet(0);
 }
 
-void loop()
-{
-  static int need_flush = 0;
-  struct X { ~X() { if (need_flush) { Serial.println(); } } } __x;
-
-  need_flush = 0;
-#define SHOW(x)               \
-    need_flush = 1; \
-    Serial.print(" " #x ":"); \
-    Serial.print(x);
-
-  sensor.requestTemperatures();
-  const auto temp = sensor.getTempCByIndex(0);
-
-#define STOP 26.0
-#define RESTART 27.0
-  const auto do_lock = (temp < STOP)
-    || ((next_action_ == LOCKED) && temp < RESTART);
-
-  SHOW(temp)
-  SHOW(do_lock)
-
-  if (do_lock) {
-    if (next_action_ != LOCKED) { /* we just locked */ set_faucet(CLOSED); }
-    next_action_ = LOCKED;
-    SHOW(next_action_)
-    delay(ONE_LOOP);
-    return;
-  }
-
-  const auto now = millis();
-
-  if (next_action_ == LOCKED) {
-    // we just unlocked.
-    next_action_ = OPENED;
-    // dont blink the led, do open the faucet just now.
-    next_time_ = 0;
-    seconds_ = 1;
-    start_ = now;
-  }
-
-  const auto delta = now - start_;
-  if (delta > UPDATE_LED) {
-    LED(led_);
-    led_ = !led_;
-    seconds_ += delta / 1000;
-    start_ = now;
-
-    SHOW(next_action_)
-    SHOW(next_time_)
-    SHOW(seconds_)
-  }
-
-  if (seconds_ >= next_time_) {
-    seconds_ = 0;
-    if (next_action_ == CLOSED) {
-      set_faucet(CLOSED);
-      next_action_ = OPENED;
-      next_time_ = 3600 /* s */;
-    } else {
-      set_faucet(OPENED);
-      next_action_ = CLOSED;
-      next_time_ = 30 /* s */;
-    }
-  }
+void loop() {
+  const auto temperature = update_temp();
+  const auto faucet_time = update_cycle(temperature);
+  update_led(faucet_time);
+  update_seconds();
+  update_faucet(faucet_time);
+  update_serial(temperature, faucet_time);
 
   delay(ONE_LOOP);
 }
