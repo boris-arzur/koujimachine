@@ -8,6 +8,7 @@
 #include <DallasTemperature.h>
 #include <OneWire.h>
 #include <inttypes.h>
+#include <math.h>
 
 #define TEMPERATURE_PIN 4
 OneWire oneWire(TEMPERATURE_PIN);
@@ -96,33 +97,21 @@ celcius_t update_temp() {
 }
 
 seconds_t update_cycle(celcius_t temp) {
-  struct point_t {
-    celcius_t temp;
-    double cycle;
-  };
-  struct system_t {
-    point_t low;
-    point_t high;
-  };
+  // settings
+  static constexpr float asymptotic_cycle = 1800.0;
 
-  const auto update_system = [](const system_t &s, celcius_t temp) {
-    const auto &low = s.low;
-    const auto &high = s.high;
-    if (temp < low.temp) {
-      return low.cycle;
-    }
-    if (temp > high.temp) {
-      return high.cycle;
-    }
-    const auto x = (temp - low.temp) / (high.temp - low.temp);
-    return low.cycle + x * (high.cycle - low.cycle);
-  };
+  static constexpr float temp_a = 30.0;
+  static constexpr float cycle_a = 3600.0 * 6;
 
-  const double six = 6 * 3600;
-  const double half = 1800;
-  const system_t wide{{0.0, six}, {40.0, half}};
-  const system_t narrow{{24.0, six}, {31.0, half}};
-  return 0.5 * update_system(wide, temp) + 0.5 * update_system(narrow, temp);
+  static constexpr float temp_b = 34.0;
+  static constexpr float cycle_b = 3600.0;
+
+  // constants
+  static constexpr float alpha = 1.0 / (temp_b - temp_a) * log((cycle_a - asymptotic_cycle)/ (cycle_b - asymptotic_cycle));
+  static constexpr float kappa = (cycle_a - asymptotic_cycle) * exp(alpha * temp_a);
+
+  // runtime
+  return asymptotic_cycle + kappa * exp(-alpha * temp);
 }
 
 // TODO why can't use own type in proto? should be state_t
