@@ -99,22 +99,25 @@ celcius_t update_temp() {
   return sensor.getTempCByIndex(0) - bias;
 }
 
-seconds_t update_cycle(celcius_t temp) {
+seconds_t update_cycle(celcius_t temperature) {
   // settings
-  static constexpr float asymptotic_cycle = 1800.0;
+  static constexpr float hour = 3600.0;
+  static constexpr float asymptotic_cycle = 0.5 * hour;
 
   static constexpr float temp_a = 30.0;
-  static constexpr float cycle_a = 3600.0 * 6;
+  static constexpr float cycle_a = 6 * hour;
 
   static constexpr float temp_b = 34.0;
-  static constexpr float cycle_b = 3600.0;
+  static constexpr float cycle_b = 1 * hour;
 
   // constants
-  static constexpr float alpha = 1.0 / (temp_b - temp_a) * log((cycle_a - asymptotic_cycle)/ (cycle_b - asymptotic_cycle));
-  static constexpr float kappa = (cycle_a - asymptotic_cycle) * exp(alpha * temp_a);
+  static constexpr float alpha = 1.0 / (temp_b - temp_a) *
+    log((cycle_a - asymptotic_cycle) / (cycle_b - asymptotic_cycle));
+  static constexpr float kappa = (cycle_a - asymptotic_cycle) *
+    exp(alpha * temp_a);
 
   // runtime
-  return asymptotic_cycle + kappa * exp(-alpha * temp);
+  return asymptotic_cycle + kappa * exp(-alpha * temperature);
 }
 
 state_t update_faucet(seconds_t back_to_open) {
