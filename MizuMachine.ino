@@ -1,14 +1,16 @@
+// On a nano clone, with a l298n h-bridge controling a motorized faucet.
 // $ arduino-cli core search avr
 // $ arduino-cli core install arduino:avr
-// $ arduino-cli compile --fqbn arduino:avr:pro:cpu=8MHzatmega328
-// KoujiMachine.ino $ sudo usermod -a -G uucp $USER $ killall minicom $
+// $ arduino-cli compile --fqbn arduino:avr:pro:cpu=16MHzatmega328
 // arduino-cli upload -p /dev/ttyUSB0 --fqbn arduino:avr:pro:cpu=16MHzatmega328
-// KoujiMachine
+// MizuMachine
 
 #include <DallasTemperature.h>
 #include <OneWire.h>
 #include <inttypes.h>
 #include <math.h>
+
+namespace {
 
 #define TEMPERATURE_PIN 4
 OneWire oneWire(TEMPERATURE_PIN);
@@ -54,12 +56,12 @@ using state_t = int;
 #define Opening 4
 #define Idling 5
 
-// TODO why can't use own type in proto? should be state_t
-void print_state(int state) {
+void print_state(state_t state) {
 #define PRINT(x_)                                                              \
   case x_:                                                                     \
     Serial.print(#x_);                                                         \
     break;
+
   switch (state) {
     PRINT(Start)
     PRINT(Closed)
@@ -73,11 +75,11 @@ void print_state(int state) {
   }
 }
 
-// TODO why can't use own type in proto? should be state_t
-void update_serial(celcius_t temperature, seconds_t back_to_open, int state) {
+void update_serial(celcius_t temperature, seconds_t back_to_open, state_t state) {
 #define SHOW(x)                                                                \
   Serial.print(" " #x ":");                                                    \
   Serial.print(x);
+
   static seconds_t last = seconds_;
   static int last_state = 0;
   if (last_state != state || seconds_ - last > 10) {
@@ -93,7 +95,8 @@ void update_serial(celcius_t temperature, seconds_t back_to_open, int state) {
 
 celcius_t update_temp() {
   sensor.requestTemperatures();
-  return sensor.getTempCByIndex(0);
+  static const celcius_t bias = 0.5; // a bit hotter at location
+  return sensor.getTempCByIndex(0) - bias;
 }
 
 seconds_t update_cycle(celcius_t temp) {
@@ -114,14 +117,14 @@ seconds_t update_cycle(celcius_t temp) {
   return asymptotic_cycle + kappa * exp(-alpha * temp);
 }
 
-// TODO why can't use own type in proto? should be state_t
-int update_faucet(seconds_t back_to_open) {
+state_t update_faucet(seconds_t back_to_open) {
   static state_t state = Closed;
   static seconds_t back_to_idle = 0;
   static seconds_t back_to_close = 0;
 
 #define OPEN(x) digitalWrite(3, x)
 #define CLOSE(x) digitalWrite(2, x)
+
   const auto idle = [&] {
     OPEN(0);
     CLOSE(0);
@@ -155,6 +158,8 @@ int update_faucet(seconds_t back_to_open) {
   }
   return state;
 }
+
+} // anon namespace
 
 void setup() {
   Serial.begin(9600); // 9600 8N1
